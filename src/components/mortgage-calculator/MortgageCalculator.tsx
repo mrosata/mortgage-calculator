@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react';
-import { TextInput, NumberInput, Select, Stack, Title, Paper, Group, Text, Button, Modal, Table, Badge } from '@mantine/core';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { TextInput, NumberInput, Select, Stack, Title, Paper, Group, Text, Button, Modal, Table, Badge, Divider } from '@mantine/core';
 import { MortgageChart } from './MortgageChart';
 
 interface MortgageValues {
@@ -28,14 +28,27 @@ interface RateComparison {
   savings: number;
 }
 
+interface RefiAnalysis {
+  currentPayment: number;
+  newPayment: number;
+  monthlySavings: number;
+  closingCosts: number;
+  breakEvenMonths: number;
+  breakEvenDate: string;
+  totalSavings5Years: number;
+  totalSavings10Years: number;
+  totalSavingsLifeOfLoan: number;
+  isWorthIt: boolean;
+}
+
 export function MortgageCalculator() {
   const [values, setValues] = useState<MortgageValues>({
-    homeValue: 400000,
-    downPayment: 80000,
-    loanAmount: 320000,
+    homeValue: 1000000,
+    downPayment: 200000,
+    loanAmount: 800000,
     interestRate: 6.48,
     loanTerm: 30,
-    propertyTax: 3000,
+    propertyTax: 10100,
     pmi: 0.5,
     homeInsurance: 1500,
     monthlyHOA: 0,
@@ -46,24 +59,62 @@ export function MortgageCalculator() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
+  const [showRefiModal, setShowRefiModal] = useState(false);
   const [mortgageName, setMortgageName] = useState('');
   const [rateComparisons, setRateComparisons] = useState<RateComparison[]>([]);
+  const [refiAnalysis, setRefiAnalysis] = useState<RefiAnalysis | null>(null);
+
+  // Refinance analysis inputs
+  const [refiInputs, setRefiInputs] = useState({
+    currentBalance: 300000,
+    newRate: 5.5,
+    newTerm: 30,
+    closingCosts: 5000,
+    yearsOwned: 2,
+  });
 
   // Load saved mortgages from localStorage on component mount
   useEffect(() => {
-    const saved = localStorage.getItem('savedMortgages');
-    if (saved) {
-      try {
-        setSavedMortgages(JSON.parse(saved));
-      } catch (error) {
-        console.error('Error loading saved mortgages:', error);
+    try {
+      // Check if localStorage is available
+      if (typeof window === 'undefined' || !window.localStorage) {
+        console.error('localStorage is not available');
+        return;
       }
+      
+      const saved = localStorage.getItem('savedMortgages');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setSavedMortgages(parsed);
+        } else {
+          console.error('Saved mortgages is not an array:', parsed);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading saved mortgages:', error);
     }
   }, []);
 
   // Save mortgages to localStorage whenever savedMortgages changes
   useEffect(() => {
-    localStorage.setItem('savedMortgages', JSON.stringify(savedMortgages));
+    try {
+      // Check if localStorage is available
+      if (typeof window === 'undefined' || !window.localStorage) {
+        console.error('localStorage is not available');
+        return;
+      }
+      
+      // Don't save on initial load when savedMortgages is empty
+      // This prevents overwriting existing data with an empty array
+      if (savedMortgages.length === 0) {
+        return;
+      }
+
+      localStorage.setItem('savedMortgages', JSON.stringify(savedMortgages));
+    } catch (error) {
+      console.error('Error saving mortgages to localStorage:', error);
+    }
   }, [savedMortgages]);
 
   const handleValueChange = (field: keyof MortgageValues, value: number | string) => {
@@ -79,14 +130,15 @@ export function MortgageCalculator() {
     });
   };
 
-  const calculateMonthlyPayment = (rate?: number) => {
-    const principal = values.loanAmount;
+  const calculateMonthlyPayment = (rate?: number, term?: number, principal?: number) => {
+    const loanPrincipal = principal || values.loanAmount;
+    const loanTerm = term || values.loanTerm;
     const monthlyInterestRate = (rate || values.interestRate) / 100 / 12;
-    const numberOfPayments = values.loanTerm * 12;
+    const numberOfPayments = loanTerm * 12;
 
     // Monthly P&I payment using the mortgage payment formula
     const monthlyPI =
-      (principal *
+      (loanPrincipal *
         (monthlyInterestRate * Math.pow(1 + monthlyInterestRate, numberOfPayments))) /
       (Math.pow(1 + monthlyInterestRate, numberOfPayments) - 1);
 
@@ -96,7 +148,7 @@ export function MortgageCalculator() {
     // Monthly PMI (if down payment is less than 20%)
     const monthlyPMI =
       values.downPayment / values.homeValue < 0.2
-        ? (values.loanAmount * (values.pmi / 100)) / 12
+        ? (loanPrincipal * (values.pmi / 100)) / 12
         : 0;
 
     // Monthly home insurance
@@ -115,10 +167,20 @@ export function MortgageCalculator() {
     };
   };
 
-  const calculateTotalInterest = (rate?: number) => {
-    const monthlyPayment = calculateMonthlyPayment(rate).principalAndInterest;
-    const totalPayments = monthlyPayment * values.loanTerm * 12;
-    return totalPayments - values.loanAmount;
+  const calculateTotalInterest = (rate?: number, term?: number, principal?: number) => {
+    const monthlyPayment = calculateMonthlyPayment(rate, term, principal).principalAndInterest;
+    const loanTerm = term || values.loanTerm;
+    const totalPayments = monthlyPayment * loanTerm * 12;
+    const loanPrincipal = principal || values.loanAmount;
+    return totalPayments - loanPrincipal;
+  };
+
+  // Helper function to safely format numbers
+  const safeToFixed = (value: number | undefined | null, decimals: number = 2): string => {
+    if (value === undefined || value === null || isNaN(value)) {
+      return '0.00';
+    }
+    return value.toFixed(decimals);
   };
 
   const currentMonthlyPayment = useMemo(() => calculateMonthlyPayment(), [values]);
@@ -166,7 +228,12 @@ export function MortgageCalculator() {
       savedAt: new Date().toISOString(),
     };
     
-    setSavedMortgages(prev => [...prev, newMortgage]);
+    console.log('Saving new mortgage:', newMortgage);
+    setSavedMortgages(prev => {
+      const updated = [...prev, newMortgage];
+      console.log('Updated saved mortgages:', updated);
+      return updated;
+    });
     setMortgageName('');
     setShowSaveModal(false);
   };
@@ -216,26 +283,67 @@ export function MortgageCalculator() {
     setShowCompareModal(true);
   };
 
+  const calculateRefiAnalysis = () => {
+    const currentPayment = calculateMonthlyPayment(values.interestRate, values.loanTerm, refiInputs.currentBalance).total;
+    const newPayment = calculateMonthlyPayment(refiInputs.newRate, refiInputs.newTerm, refiInputs.currentBalance).total;
+    const monthlySavings = currentPayment - newPayment;
+    
+    // Calculate break-even point
+    const breakEvenMonths = refiInputs.closingCosts / monthlySavings;
+    const breakEvenDate = new Date();
+    breakEvenDate.setMonth(breakEvenDate.getMonth() + Math.ceil(breakEvenMonths));
+    
+    // Calculate total savings over different time periods
+    const totalSavings5Years = (monthlySavings * 60) - refiInputs.closingCosts;
+    const totalSavings10Years = (monthlySavings * 120) - refiInputs.closingCosts;
+    
+    // Calculate savings over the life of the new loan
+    const newLoanTerm = refiInputs.newTerm;
+    const totalSavingsLifeOfLoan = (monthlySavings * newLoanTerm * 12) - refiInputs.closingCosts;
+    
+    // Determine if refinancing is worth it (break-even within 2 years)
+    const isWorthIt = breakEvenMonths <= 24 && monthlySavings > 0;
+    
+    const analysis: RefiAnalysis = {
+      currentPayment,
+      newPayment,
+      monthlySavings,
+      closingCosts: refiInputs.closingCosts,
+      breakEvenMonths,
+      breakEvenDate: breakEvenDate.toLocaleDateString(),
+      totalSavings5Years,
+      totalSavings10Years,
+      totalSavingsLifeOfLoan,
+      isWorthIt,
+    };
+    
+    setRefiAnalysis(analysis);
+    setShowRefiModal(true);
+  };
+
   return (
     <Paper p="md" radius="md">
-              <Stack gap="lg">
-          <Group justify="space-between" align="center">
-            <Title order={2}>Mortgage Calculator</Title>
-            <Group>
-              <Button variant="outline" onClick={() => setShowSaveModal(true)}>
-                Save Mortgage
-              </Button>
-              <Button variant="outline" onClick={() => setShowLoadModal(true)}>
-                Load Mortgage
-              </Button>
-              <Button variant="outline" onClick={generateRateComparisons}>
-                Compare Rates
-              </Button>
-            </Group>
+      <Stack gap="lg">
+        <Group justify="space-between" align="center">
+          <Title order={2}>Mortgage Calculator</Title>
+          <Group>
+            <Button variant="outline" onClick={() => setShowSaveModal(true)}>
+              Save Mortgage
+            </Button>
+            <Button variant="outline" onClick={() => setShowLoadModal(true)}>
+              Load Mortgage
+            </Button>
+            <Button variant="outline" onClick={generateRateComparisons}>
+              Compare Rates
+            </Button>
+            <Button variant="outline" onClick={() => setShowRefiModal(true)}>
+              Refi Analysis
+            </Button>
           </Group>
+        </Group>
 
-                  <Group grow align="flex-start">
-            <Stack gap="md" style={{ flex: 1 }}>
+        <Group grow align="flex-start">
+          <Stack gap="md" style={{ flex: 1 }}>
             <Select
               label="Loan Type"
               value={values.loanType}
@@ -327,27 +435,27 @@ export function MortgageCalculator() {
               <Stack gap="xs" mt="md">
                 <Group justify="space-between">
                   <Text>Principal & Interest:</Text>
-                  <Text>${currentMonthlyPayment.principalAndInterest.toFixed(2)}</Text>
+                  <Text>${safeToFixed(currentMonthlyPayment.principalAndInterest)}</Text>
                 </Group>
                 <Group justify="space-between">
                   <Text>Property Tax:</Text>
-                  <Text>${currentMonthlyPayment.tax.toFixed(2)}</Text>
+                  <Text>${safeToFixed(currentMonthlyPayment.tax)}</Text>
                 </Group>
                 <Group justify="space-between">
                   <Text>PMI:</Text>
-                  <Text>${currentMonthlyPayment.pmi.toFixed(2)}</Text>
+                  <Text>${safeToFixed(currentMonthlyPayment.pmi)}</Text>
                 </Group>
                 <Group justify="space-between">
                   <Text>Home Insurance:</Text>
-                  <Text>${currentMonthlyPayment.insurance.toFixed(2)}</Text>
+                  <Text>${safeToFixed(currentMonthlyPayment.insurance)}</Text>
                 </Group>
                 <Group justify="space-between">
                   <Text>HOA:</Text>
-                  <Text>${currentMonthlyPayment.hoa.toFixed(2)}</Text>
+                  <Text>${safeToFixed(currentMonthlyPayment.hoa)}</Text>
                 </Group>
                 <Group justify="space-between" mt="md">
                   <Text fw={700}>Total Monthly Payment:</Text>
-                  <Text fw={700}>${currentMonthlyPayment.total.toFixed(2)}</Text>
+                  <Text fw={700}>${safeToFixed(currentMonthlyPayment.total)}</Text>
                 </Group>
               </Stack>
             </Paper>
@@ -359,14 +467,14 @@ export function MortgageCalculator() {
 
       {/* Save Mortgage Modal */}
       <Modal opened={showSaveModal} onClose={() => setShowSaveModal(false)} title="Save Mortgage">
-        <Stack spacing="md">
+        <Stack gap="md">
           <TextInput
             label="Mortgage Name"
             placeholder="Enter a name for this mortgage"
             value={mortgageName}
             onChange={(e) => setMortgageName(e.target.value)}
           />
-          <Group position="right">
+          <Group justify="flex-end">
             <Button variant="outline" onClick={() => setShowSaveModal(false)}>
               Cancel
             </Button>
@@ -379,9 +487,9 @@ export function MortgageCalculator() {
 
       {/* Load Mortgage Modal */}
       <Modal opened={showLoadModal} onClose={() => setShowLoadModal(false)} title="Load Saved Mortgage" size="lg">
-        <Stack spacing="md">
+        <Stack gap="md">
           {savedMortgages.length === 0 ? (
-            <Text color="dimmed" align="center" py="xl">
+            <Text c="dimmed" ta="center" py="xl">
               No saved mortgages found
             </Text>
           ) : (
@@ -406,10 +514,10 @@ export function MortgageCalculator() {
                       </Badge>
                     </td>
                     <td>{mortgage.interestRate}%</td>
-                    <td>${calculateMonthlyPayment(mortgage.interestRate).total.toFixed(2)}</td>
+                    <td>${safeToFixed(calculateMonthlyPayment(mortgage.interestRate).total)}</td>
                     <td>{new Date(mortgage.savedAt).toLocaleDateString()}</td>
                     <td>
-                      <Group spacing="xs">
+                      <Group gap="xs">
                         <Button size="xs" onClick={() => handleLoadMortgage(mortgage)}>
                           Load
                         </Button>
@@ -428,8 +536,8 @@ export function MortgageCalculator() {
 
       {/* Rate Comparison Modal */}
       <Modal opened={showCompareModal} onClose={() => setShowCompareModal(false)} title="Rate Comparison" size="xl">
-        <Stack spacing="md">
-          <Text size="sm" color="dimmed">
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
             Comparing rates for a ${values.loanAmount.toLocaleString()} loan over {values.loanTerm} years
           </Text>
           <Table>
@@ -448,26 +556,161 @@ export function MortgageCalculator() {
                   backgroundColor: comparison.rate === values.interestRate ? '#f0f9ff' : undefined
                 }}>
                   <td>
-                    <Text weight={comparison.rate === values.interestRate ? 700 : 400}>
-                      {comparison.rate.toFixed(2)}%
+                    <Text fw={comparison.rate === values.interestRate ? 700 : 400}>
+                      {safeToFixed(comparison.rate, 2)}%
                     </Text>
                   </td>
-                  <td>${comparison.monthlyPayment.toFixed(2)}</td>
+                  <td>${safeToFixed(comparison.monthlyPayment)}</td>
                   <td>${comparison.totalInterest.toLocaleString()}</td>
                   <td>
-                    <Text color={comparison.savings > 0 ? 'green' : 'red'}>
-                      {comparison.savings > 0 ? '+' : ''}${comparison.savings.toFixed(2)}
+                    <Text c={comparison.savings > 0 ? 'green' : 'red'}>
+                      {comparison.savings > 0 ? '+' : ''}${safeToFixed(comparison.savings)}
                     </Text>
                   </td>
                   <td>
-                    <Text color={comparison.savings > 0 ? 'green' : 'red'}>
-                      {comparison.savings > 0 ? '+' : ''}${(comparison.savings * 12).toFixed(2)}
+                    <Text c={comparison.savings > 0 ? 'green' : 'red'}>
+                      {comparison.savings > 0 ? '+' : ''}${safeToFixed(comparison.savings * 12)}
                     </Text>
                   </td>
                 </tr>
               ))}
             </tbody>
           </Table>
+        </Stack>
+      </Modal>
+
+      {/* Refinance Analysis Modal */}
+      <Modal opened={showRefiModal} onClose={() => setShowRefiModal(false)} title="Refinance Analysis" size="xl">
+        <Stack gap="lg">
+          {!refiAnalysis ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Enter your current loan details and the new refinance terms to see if refinancing makes sense.
+              </Text>
+              
+              <Group grow>
+                <NumberInput
+                  label="Current Loan Balance"
+                  value={refiInputs.currentBalance}
+                  onChange={(val) => setRefiInputs(prev => ({ ...prev, currentBalance: Number(val) || 0 }))}
+                  prefix="$"
+                  thousandSeparator=","
+                />
+                <NumberInput
+                  label="New Interest Rate"
+                  value={refiInputs.newRate}
+                  onChange={(val) => setRefiInputs(prev => ({ ...prev, newRate: Number(val) || 0 }))}
+                  suffix="%"
+                  decimalScale={3}
+                />
+              </Group>
+              
+              <Group grow>
+                <Select
+                  label="New Loan Term"
+                  value={refiInputs.newTerm.toString()}
+                  onChange={(val) => setRefiInputs(prev => ({ ...prev, newTerm: parseInt(val || '30') }))}
+                  data={[
+                    { value: '15', label: '15 years' },
+                    { value: '20', label: '20 years' },
+                    { value: '30', label: '30 years' },
+                  ]}
+                />
+                <NumberInput
+                  label="Closing Costs"
+                  value={refiInputs.closingCosts}
+                  onChange={(val) => setRefiInputs(prev => ({ ...prev, closingCosts: Number(val) || 0 }))}
+                  prefix="$"
+                  thousandSeparator=","
+                />
+              </Group>
+              
+              <Group justify="center">
+                <Button onClick={calculateRefiAnalysis} size="lg">
+                  Analyze Refinance
+                </Button>
+              </Group>
+            </>
+          ) : (
+            <>
+              <Paper withBorder p="md">
+                <Group justify="space-between" align="center" mb="md">
+                  <Title order={3}>Refinance Recommendation</Title>
+                  <Badge 
+                    size="lg" 
+                    color={refiAnalysis.isWorthIt ? 'green' : 'red'}
+                    variant="filled"
+                  >
+                    {refiAnalysis.isWorthIt ? 'WORTH IT' : 'NOT WORTH IT'}
+                  </Badge>
+                </Group>
+                
+                <Stack gap="md">
+                  <Group grow>
+                    <Paper p="sm" withBorder>
+                      <Text size="sm" c="dimmed">Current Payment</Text>
+                      <Text fw={700} size="lg">${safeToFixed(refiAnalysis.currentPayment)}</Text>
+                    </Paper>
+                    <Paper p="sm" withBorder>
+                      <Text size="sm" c="dimmed">New Payment</Text>
+                      <Text fw={700} size="lg" c="green">${safeToFixed(refiAnalysis.newPayment)}</Text>
+                    </Paper>
+                    <Paper p="sm" withBorder>
+                      <Text size="sm" c="dimmed">Monthly Savings</Text>
+                      <Text fw={700} size="lg" c="green">${safeToFixed(refiAnalysis.monthlySavings)}</Text>
+                    </Paper>
+                  </Group>
+                  
+                  <Divider />
+                  
+                  <Group grow>
+                    <Paper p="sm" withBorder>
+                      <Text size="sm" c="dimmed">Break-even Time</Text>
+                      <Text fw={700}>{safeToFixed(refiAnalysis.breakEvenMonths, 1)} months</Text>
+                      <Text size="sm" c="dimmed">({refiAnalysis.breakEvenDate})</Text>
+                    </Paper>
+                    <Paper p="sm" withBorder>
+                      <Text size="sm" c="dimmed">Closing Costs</Text>
+                      <Text fw={700}>${refiAnalysis.closingCosts.toLocaleString()}</Text>
+                    </Paper>
+                  </Group>
+                  
+                  <Divider />
+                  
+                  <Title order={4}>Total Savings Over Time</Title>
+                  <Group grow>
+                    <Paper p="sm" withBorder>
+                      <Text size="sm" c="dimmed">5 Years</Text>
+                      <Text fw={700} c={refiAnalysis.totalSavings5Years > 0 ? 'green' : 'red'}>
+                        ${safeToFixed(refiAnalysis.totalSavings5Years, 0)}
+                      </Text>
+                    </Paper>
+                    <Paper p="sm" withBorder>
+                      <Text size="sm" c="dimmed">10 Years</Text>
+                      <Text fw={700} c={refiAnalysis.totalSavings10Years > 0 ? 'green' : 'red'}>
+                        ${safeToFixed(refiAnalysis.totalSavings10Years, 0)}
+                      </Text>
+                    </Paper>
+                    <Paper p="sm" withBorder>
+                      <Text size="sm" c="dimmed">Life of Loan</Text>
+                      <Text fw={700} c={refiAnalysis.totalSavingsLifeOfLoan > 0 ? 'green' : 'red'}>
+                        ${safeToFixed(refiAnalysis.totalSavingsLifeOfLoan, 0)}
+                      </Text>
+                    </Paper>
+                  </Group>
+                </Stack>
+              </Paper>
+              
+              <Group justify="space-between">
+                <Button variant="outline" onClick={() => setRefiAnalysis(null)}>
+                  New Analysis
+                </Button>
+                <Button onClick={() => setShowRefiModal(false)}>
+                  Close
+                </Button>
+              </Group>
+            </>
+          )}
         </Stack>
       </Modal>
     </Paper>
