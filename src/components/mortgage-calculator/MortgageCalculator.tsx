@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { TextInput, NumberInput, Select, Stack, Title, Paper, Group, Text } from '@mantine/core';
+import { useState, useMemo, useEffect } from 'react';
+import { TextInput, NumberInput, Select, Stack, Title, Paper, Group, Text, Button, Modal, Table, Badge } from '@mantine/core';
 import { MortgageChart } from './MortgageChart';
 
 interface MortgageValues {
@@ -12,6 +12,20 @@ interface MortgageValues {
   pmi: number;
   homeInsurance: number;
   monthlyHOA: number;
+  loanType: 'purchase' | 'refi';
+}
+
+interface SavedMortgage extends MortgageValues {
+  id: string;
+  name: string;
+  savedAt: string;
+}
+
+interface RateComparison {
+  rate: number;
+  monthlyPayment: number;
+  totalInterest: number;
+  savings: number;
 }
 
 export function MortgageCalculator() {
@@ -25,9 +39,34 @@ export function MortgageCalculator() {
     pmi: 0.5,
     homeInsurance: 1500,
     monthlyHOA: 0,
+    loanType: 'purchase',
   });
 
-  const handleValueChange = (field: keyof MortgageValues, value: number) => {
+  const [savedMortgages, setSavedMortgages] = useState<SavedMortgage[]>([]);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showLoadModal, setShowLoadModal] = useState(false);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [mortgageName, setMortgageName] = useState('');
+  const [rateComparisons, setRateComparisons] = useState<RateComparison[]>([]);
+
+  // Load saved mortgages from localStorage on component mount
+  useEffect(() => {
+    const saved = localStorage.getItem('savedMortgages');
+    if (saved) {
+      try {
+        setSavedMortgages(JSON.parse(saved));
+      } catch (error) {
+        console.error('Error loading saved mortgages:', error);
+      }
+    }
+  }, []);
+
+  // Save mortgages to localStorage whenever savedMortgages changes
+  useEffect(() => {
+    localStorage.setItem('savedMortgages', JSON.stringify(savedMortgages));
+  }, [savedMortgages]);
+
+  const handleValueChange = (field: keyof MortgageValues, value: number | string) => {
     setValues((prev) => {
       const newValues = { ...prev, [field]: value };
       
@@ -40,9 +79,9 @@ export function MortgageCalculator() {
     });
   };
 
-  const calculateMonthlyPayment = useMemo(() => {
+  const calculateMonthlyPayment = (rate?: number) => {
     const principal = values.loanAmount;
-    const monthlyInterestRate = values.interestRate / 100 / 12;
+    const monthlyInterestRate = (rate || values.interestRate) / 100 / 12;
     const numberOfPayments = values.loanTerm * 12;
 
     // Monthly P&I payment using the mortgage payment formula
@@ -74,12 +113,20 @@ export function MortgageCalculator() {
       insurance: monthlyInsurance,
       hoa: values.monthlyHOA,
     };
-  }, [values]);
+  };
+
+  const calculateTotalInterest = (rate?: number) => {
+    const monthlyPayment = calculateMonthlyPayment(rate).principalAndInterest;
+    const totalPayments = monthlyPayment * values.loanTerm * 12;
+    return totalPayments - values.loanAmount;
+  };
+
+  const currentMonthlyPayment = useMemo(() => calculateMonthlyPayment(), [values]);
 
   const calculateAmortizationSchedule = useMemo(() => {
     const monthlyInterestRate = values.interestRate / 100 / 12;
     const numberOfPayments = values.loanTerm * 12;
-    const monthlyPI = calculateMonthlyPayment.principalAndInterest;
+    const monthlyPI = currentMonthlyPayment.principalAndInterest;
     
     let balance = values.loanAmount;
     const schedule = [];
@@ -107,21 +154,104 @@ export function MortgageCalculator() {
     }
 
     return schedule;
-  }, [values, calculateMonthlyPayment.principalAndInterest]);
+  }, [values, currentMonthlyPayment.principalAndInterest]);
+
+  const handleSaveMortgage = () => {
+    if (!mortgageName.trim()) return;
+    
+    const newMortgage: SavedMortgage = {
+      ...values,
+      id: Date.now().toString(),
+      name: mortgageName.trim(),
+      savedAt: new Date().toISOString(),
+    };
+    
+    setSavedMortgages(prev => [...prev, newMortgage]);
+    setMortgageName('');
+    setShowSaveModal(false);
+  };
+
+  const handleLoadMortgage = (mortgage: SavedMortgage) => {
+    setValues({
+      homeValue: mortgage.homeValue,
+      downPayment: mortgage.downPayment,
+      loanAmount: mortgage.loanAmount,
+      interestRate: mortgage.interestRate,
+      loanTerm: mortgage.loanTerm,
+      propertyTax: mortgage.propertyTax,
+      pmi: mortgage.pmi,
+      homeInsurance: mortgage.homeInsurance,
+      monthlyHOA: mortgage.monthlyHOA,
+      loanType: mortgage.loanType,
+    });
+    setShowLoadModal(false);
+  };
+
+  const handleDeleteMortgage = (id: string) => {
+    setSavedMortgages(prev => prev.filter(m => m.id !== id));
+  };
+
+  const generateRateComparisons = () => {
+    const currentRate = values.interestRate;
+    const comparisons: RateComparison[] = [];
+    
+    // Generate comparisons for rates from -2% to +2% in 0.25% increments
+    for (let rateOffset = -2; rateOffset <= 2; rateOffset += 0.25) {
+      const rate = currentRate + rateOffset;
+      if (rate > 0) {
+        const monthlyPayment = calculateMonthlyPayment(rate).total;
+        const totalInterest = calculateTotalInterest(rate);
+        const savings = currentMonthlyPayment.total - monthlyPayment;
+        
+        comparisons.push({
+          rate,
+          monthlyPayment,
+          totalInterest,
+          savings,
+        });
+      }
+    }
+    
+    setRateComparisons(comparisons);
+    setShowCompareModal(true);
+  };
 
   return (
     <Paper p="md" radius="md">
-      <Stack spacing="lg">
-        <Title order={2}>Mortgage Calculator</Title>
+              <Stack gap="lg">
+          <Group justify="space-between" align="center">
+            <Title order={2}>Mortgage Calculator</Title>
+            <Group>
+              <Button variant="outline" onClick={() => setShowSaveModal(true)}>
+                Save Mortgage
+              </Button>
+              <Button variant="outline" onClick={() => setShowLoadModal(true)}>
+                Load Mortgage
+              </Button>
+              <Button variant="outline" onClick={generateRateComparisons}>
+                Compare Rates
+              </Button>
+            </Group>
+          </Group>
 
-        <Group grow align="flex-start">
-          <Stack spacing="md" style={{ flex: 1 }}>
+                  <Group grow align="flex-start">
+            <Stack gap="md" style={{ flex: 1 }}>
+            <Select
+              label="Loan Type"
+              value={values.loanType}
+              onChange={(val) => handleValueChange('loanType', val as 'purchase' | 'refi')}
+              data={[
+                { value: 'purchase', label: 'Purchase' },
+                { value: 'refi', label: 'Refinance' },
+              ]}
+            />
+
             <NumberInput
               label="Home Value"
               value={values.homeValue}
               onChange={(val) => handleValueChange('homeValue', val || 0)}
               prefix="$"
-              thousandsSeparator=","
+              thousandSeparator=","
             />
 
             <NumberInput
@@ -129,7 +259,7 @@ export function MortgageCalculator() {
               value={values.downPayment}
               onChange={(val) => handleValueChange('downPayment', val || 0)}
               prefix="$"
-              thousandsSeparator=","
+              thousandSeparator=","
             />
 
             <NumberInput
@@ -137,7 +267,7 @@ export function MortgageCalculator() {
               value={values.loanAmount}
               onChange={(val) => handleValueChange('loanAmount', val || 0)}
               prefix="$"
-              thousandsSeparator=","
+              thousandSeparator=","
             />
 
             <NumberInput
@@ -145,7 +275,7 @@ export function MortgageCalculator() {
               value={values.interestRate}
               onChange={(val) => handleValueChange('interestRate', val || 0)}
               suffix="%"
-              precision={2}
+              decimalScale={3}
             />
 
             <Select
@@ -163,7 +293,7 @@ export function MortgageCalculator() {
               value={values.propertyTax}
               onChange={(val) => handleValueChange('propertyTax', val || 0)}
               prefix="$"
-              thousandsSeparator=","
+              thousandSeparator=","
             />
 
             <NumberInput
@@ -171,7 +301,7 @@ export function MortgageCalculator() {
               value={values.pmi}
               onChange={(val) => handleValueChange('pmi', val || 0)}
               suffix="%"
-              precision={2}
+              decimalScale={2}
             />
 
             <NumberInput
@@ -179,7 +309,7 @@ export function MortgageCalculator() {
               value={values.homeInsurance}
               onChange={(val) => handleValueChange('homeInsurance', val || 0)}
               prefix="$"
-              thousandsSeparator=","
+              thousandSeparator=","
             />
 
             <NumberInput
@@ -187,37 +317,37 @@ export function MortgageCalculator() {
               value={values.monthlyHOA}
               onChange={(val) => handleValueChange('monthlyHOA', val || 0)}
               prefix="$"
-              thousandsSeparator=","
+              thousandSeparator=","
             />
           </Stack>
 
-          <Stack spacing="md" style={{ flex: 1 }}>
+          <Stack gap="md" style={{ flex: 1 }}>
             <Paper withBorder p="md">
               <Title order={3}>Monthly Payment Breakdown</Title>
-              <Stack spacing="xs" mt="md">
-                <Group position="apart">
+              <Stack gap="xs" mt="md">
+                <Group justify="space-between">
                   <Text>Principal & Interest:</Text>
-                  <Text>${calculateMonthlyPayment.principalAndInterest.toFixed(2)}</Text>
+                  <Text>${currentMonthlyPayment.principalAndInterest.toFixed(2)}</Text>
                 </Group>
-                <Group position="apart">
+                <Group justify="space-between">
                   <Text>Property Tax:</Text>
-                  <Text>${calculateMonthlyPayment.tax.toFixed(2)}</Text>
+                  <Text>${currentMonthlyPayment.tax.toFixed(2)}</Text>
                 </Group>
-                <Group position="apart">
+                <Group justify="space-between">
                   <Text>PMI:</Text>
-                  <Text>${calculateMonthlyPayment.pmi.toFixed(2)}</Text>
+                  <Text>${currentMonthlyPayment.pmi.toFixed(2)}</Text>
                 </Group>
-                <Group position="apart">
+                <Group justify="space-between">
                   <Text>Home Insurance:</Text>
-                  <Text>${calculateMonthlyPayment.insurance.toFixed(2)}</Text>
+                  <Text>${currentMonthlyPayment.insurance.toFixed(2)}</Text>
                 </Group>
-                <Group position="apart">
+                <Group justify="space-between">
                   <Text>HOA:</Text>
-                  <Text>${calculateMonthlyPayment.hoa.toFixed(2)}</Text>
+                  <Text>${currentMonthlyPayment.hoa.toFixed(2)}</Text>
                 </Group>
-                <Group position="apart" mt="md">
-                  <Text weight={700}>Total Monthly Payment:</Text>
-                  <Text weight={700}>${calculateMonthlyPayment.total.toFixed(2)}</Text>
+                <Group justify="space-between" mt="md">
+                  <Text fw={700}>Total Monthly Payment:</Text>
+                  <Text fw={700}>${currentMonthlyPayment.total.toFixed(2)}</Text>
                 </Group>
               </Stack>
             </Paper>
@@ -226,6 +356,120 @@ export function MortgageCalculator() {
           </Stack>
         </Group>
       </Stack>
+
+      {/* Save Mortgage Modal */}
+      <Modal opened={showSaveModal} onClose={() => setShowSaveModal(false)} title="Save Mortgage">
+        <Stack spacing="md">
+          <TextInput
+            label="Mortgage Name"
+            placeholder="Enter a name for this mortgage"
+            value={mortgageName}
+            onChange={(e) => setMortgageName(e.target.value)}
+          />
+          <Group position="right">
+            <Button variant="outline" onClick={() => setShowSaveModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveMortgage} disabled={!mortgageName.trim()}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Load Mortgage Modal */}
+      <Modal opened={showLoadModal} onClose={() => setShowLoadModal(false)} title="Load Saved Mortgage" size="lg">
+        <Stack spacing="md">
+          {savedMortgages.length === 0 ? (
+            <Text color="dimmed" align="center" py="xl">
+              No saved mortgages found
+            </Text>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Loan Type</th>
+                  <th>Rate</th>
+                  <th>Monthly Payment</th>
+                  <th>Saved</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {savedMortgages.map((mortgage) => (
+                  <tr key={mortgage.id}>
+                    <td>{mortgage.name}</td>
+                    <td>
+                      <Badge variant="light" color={mortgage.loanType === 'purchase' ? 'blue' : 'green'}>
+                        {mortgage.loanType}
+                      </Badge>
+                    </td>
+                    <td>{mortgage.interestRate}%</td>
+                    <td>${calculateMonthlyPayment(mortgage.interestRate).total.toFixed(2)}</td>
+                    <td>{new Date(mortgage.savedAt).toLocaleDateString()}</td>
+                    <td>
+                      <Group spacing="xs">
+                        <Button size="xs" onClick={() => handleLoadMortgage(mortgage)}>
+                          Load
+                        </Button>
+                        <Button size="xs" color="red" variant="outline" onClick={() => handleDeleteMortgage(mortgage.id)}>
+                          Delete
+                        </Button>
+                      </Group>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Stack>
+      </Modal>
+
+      {/* Rate Comparison Modal */}
+      <Modal opened={showCompareModal} onClose={() => setShowCompareModal(false)} title="Rate Comparison" size="xl">
+        <Stack spacing="md">
+          <Text size="sm" color="dimmed">
+            Comparing rates for a ${values.loanAmount.toLocaleString()} loan over {values.loanTerm} years
+          </Text>
+          <Table>
+            <thead>
+              <tr>
+                <th>Interest Rate</th>
+                <th>Monthly Payment</th>
+                <th>Total Interest</th>
+                <th>Monthly Savings</th>
+                <th>Annual Savings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rateComparisons.map((comparison) => (
+                <tr key={comparison.rate} style={{
+                  backgroundColor: comparison.rate === values.interestRate ? '#f0f9ff' : undefined
+                }}>
+                  <td>
+                    <Text weight={comparison.rate === values.interestRate ? 700 : 400}>
+                      {comparison.rate.toFixed(2)}%
+                    </Text>
+                  </td>
+                  <td>${comparison.monthlyPayment.toFixed(2)}</td>
+                  <td>${comparison.totalInterest.toLocaleString()}</td>
+                  <td>
+                    <Text color={comparison.savings > 0 ? 'green' : 'red'}>
+                      {comparison.savings > 0 ? '+' : ''}${comparison.savings.toFixed(2)}
+                    </Text>
+                  </td>
+                  <td>
+                    <Text color={comparison.savings > 0 ? 'green' : 'red'}>
+                      {comparison.savings > 0 ? '+' : ''}${(comparison.savings * 12).toFixed(2)}
+                    </Text>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Stack>
+      </Modal>
     </Paper>
   );
 } 
