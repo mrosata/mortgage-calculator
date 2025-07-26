@@ -183,6 +183,17 @@ export function MortgageCalculator() {
     return value.toFixed(decimals);
   };
 
+  // Helper function to format numbers with commas
+  const formatWithCommas = (value: number | undefined | null, decimals: number = 2): string => {
+    if (value === undefined || value === null || isNaN(value)) {
+      return '0.00';
+    }
+    return value.toLocaleString('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  };
+
   const currentMonthlyPayment = useMemo(() => calculateMonthlyPayment(), [values]);
 
   const calculateAmortizationSchedule = useMemo(() => {
@@ -435,27 +446,27 @@ export function MortgageCalculator() {
               <Stack gap="xs" mt="md">
                 <Group justify="space-between">
                   <Text>Principal & Interest:</Text>
-                  <Text>${safeToFixed(currentMonthlyPayment.principalAndInterest)}</Text>
+                  <Text>${formatWithCommas(currentMonthlyPayment.principalAndInterest)}</Text>
                 </Group>
                 <Group justify="space-between">
                   <Text>Property Tax:</Text>
-                  <Text>${safeToFixed(currentMonthlyPayment.tax)}</Text>
+                  <Text>${formatWithCommas(currentMonthlyPayment.tax)}</Text>
                 </Group>
                 <Group justify="space-between">
                   <Text>PMI:</Text>
-                  <Text>${safeToFixed(currentMonthlyPayment.pmi)}</Text>
+                  <Text>${formatWithCommas(currentMonthlyPayment.pmi)}</Text>
                 </Group>
                 <Group justify="space-between">
                   <Text>Home Insurance:</Text>
-                  <Text>${safeToFixed(currentMonthlyPayment.insurance)}</Text>
+                  <Text>${formatWithCommas(currentMonthlyPayment.insurance)}</Text>
                 </Group>
                 <Group justify="space-between">
                   <Text>HOA:</Text>
-                  <Text>${safeToFixed(currentMonthlyPayment.hoa)}</Text>
+                  <Text>${formatWithCommas(currentMonthlyPayment.hoa)}</Text>
                 </Group>
                 <Group justify="space-between" mt="md">
                   <Text fw={700}>Total Monthly Payment:</Text>
-                  <Text fw={700}>${safeToFixed(currentMonthlyPayment.total)}</Text>
+                  <Text fw={700}>${formatWithCommas(currentMonthlyPayment.total)}</Text>
                 </Group>
               </Stack>
             </Paper>
@@ -514,7 +525,7 @@ export function MortgageCalculator() {
                       </Badge>
                     </td>
                     <td>{mortgage.interestRate}%</td>
-                    <td>${safeToFixed(calculateMonthlyPayment(mortgage.interestRate).total)}</td>
+                    <td>${formatWithCommas(calculateMonthlyPayment(mortgage.interestRate).total)}</td>
                     <td>{new Date(mortgage.savedAt).toLocaleDateString()}</td>
                     <td>
                       <Group gap="xs">
@@ -560,16 +571,16 @@ export function MortgageCalculator() {
                       {safeToFixed(comparison.rate, 2)}%
                     </Text>
                   </td>
-                  <td>${safeToFixed(comparison.monthlyPayment)}</td>
+                  <td>${formatWithCommas(comparison.monthlyPayment)}</td>
                   <td>${comparison.totalInterest.toLocaleString()}</td>
                   <td>
                     <Text c={comparison.savings > 0 ? 'green' : 'red'}>
-                      {comparison.savings > 0 ? '+' : ''}${safeToFixed(comparison.savings)}
+                      {comparison.savings > 0 ? '+' : ''}${formatWithCommas(comparison.savings)}
                     </Text>
                   </td>
                   <td>
                     <Text c={comparison.savings > 0 ? 'green' : 'red'}>
-                      {comparison.savings > 0 ? '+' : ''}${safeToFixed(comparison.savings * 12)}
+                      {comparison.savings > 0 ? '+' : ''}${formatWithCommas(comparison.savings * 12)}
                     </Text>
                   </td>
                 </tr>
@@ -649,15 +660,15 @@ export function MortgageCalculator() {
                   <Group grow>
                     <Paper p="sm" withBorder>
                       <Text size="sm" c="dimmed">Current Payment</Text>
-                      <Text fw={700} size="lg">${safeToFixed(refiAnalysis.currentPayment)}</Text>
+                      <Text fw={700} size="lg">${formatWithCommas(refiAnalysis.currentPayment)}</Text>
                     </Paper>
                     <Paper p="sm" withBorder>
                       <Text size="sm" c="dimmed">New Payment</Text>
-                      <Text fw={700} size="lg" c="green">${safeToFixed(refiAnalysis.newPayment)}</Text>
+                      <Text fw={700} size="lg" c="green">${formatWithCommas(refiAnalysis.newPayment)}</Text>
                     </Paper>
                     <Paper p="sm" withBorder>
                       <Text size="sm" c="dimmed">Monthly Savings</Text>
-                      <Text fw={700} size="lg" c="green">${safeToFixed(refiAnalysis.monthlySavings)}</Text>
+                      <Text fw={700} size="lg" c="green">${formatWithCommas(refiAnalysis.monthlySavings)}</Text>
                     </Paper>
                   </Group>
                   
@@ -682,19 +693,19 @@ export function MortgageCalculator() {
                     <Paper p="sm" withBorder>
                       <Text size="sm" c="dimmed">5 Years</Text>
                       <Text fw={700} c={refiAnalysis.totalSavings5Years > 0 ? 'green' : 'red'}>
-                        ${safeToFixed(refiAnalysis.totalSavings5Years, 0)}
+                        ${formatWithCommas(refiAnalysis.totalSavings5Years, 0)}
                       </Text>
                     </Paper>
                     <Paper p="sm" withBorder>
                       <Text size="sm" c="dimmed">10 Years</Text>
                       <Text fw={700} c={refiAnalysis.totalSavings10Years > 0 ? 'green' : 'red'}>
-                        ${safeToFixed(refiAnalysis.totalSavings10Years, 0)}
+                        ${formatWithCommas(refiAnalysis.totalSavings10Years, 0)}
                       </Text>
                     </Paper>
                     <Paper p="sm" withBorder>
                       <Text size="sm" c="dimmed">Life of Loan</Text>
                       <Text fw={700} c={refiAnalysis.totalSavingsLifeOfLoan > 0 ? 'green' : 'red'}>
-                        ${safeToFixed(refiAnalysis.totalSavingsLifeOfLoan, 0)}
+                        ${formatWithCommas(refiAnalysis.totalSavingsLifeOfLoan, 0)}
                       </Text>
                     </Paper>
                   </Group>
