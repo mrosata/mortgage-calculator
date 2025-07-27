@@ -73,6 +73,12 @@ export function MortgageCalculator() {
     yearsOwned: 2,
   });
 
+  // Calculate remaining loan term based on current loan
+  const calculateRemainingTerm = () => {
+    const yearsPaid = refiInputs.yearsOwned;
+    return Math.max(0, values.loanTerm - yearsPaid);
+  };
+
   // Load saved mortgages from localStorage on component mount
   useEffect(() => {
     try {
@@ -273,9 +279,9 @@ export function MortgageCalculator() {
     const currentRate = values.interestRate;
     const comparisons: RateComparison[] = [];
     
-    // Generate comparisons for rates from -2% to +2% in 0.25% increments
-    for (let rateOffset = -2; rateOffset <= 2; rateOffset += 0.25) {
-      const rate = currentRate + rateOffset;
+    // Generate comparisons for rates from -2% to +2% in 0.125% increments (more precise)
+    for (let rateOffset = -2; rateOffset <= 2; rateOffset += 0.125) {
+      const rate = Math.round((currentRate + rateOffset) * 1000) / 1000; // Round to 3 decimal places
       if (rate > 0) {
         const monthlyPayment = calculateMonthlyPayment(rate).total;
         const totalInterest = calculateTotalInterest(rate);
@@ -471,7 +477,25 @@ export function MortgageCalculator() {
               </Stack>
             </Paper>
 
-            <MortgageChart data={calculateAmortizationSchedule} />
+            <MortgageChart 
+              data={calculateAmortizationSchedule} 
+              onBarClick={(yearData) => {
+                // Calculate remaining years from the clicked year
+                const remainingYears = values.loanTerm - yearData.year;
+                
+                // Prepopulate refi analysis with data from the clicked year
+                setRefiInputs(prev => ({
+                  ...prev,
+                  currentBalance: Math.round(yearData.balance * 100) / 100, // Round to hundredth
+                  newRate: values.interestRate - 0.5, // Default to 0.5% lower than current rate
+                  newTerm: remainingYears, // Set to remaining term
+                  yearsOwned: yearData.year, // Update years owned
+                }));
+                // Clear any previous analysis and start fresh
+                setRefiAnalysis(null);
+                setShowRefiModal(true);
+              }}
+            />
           </Stack>
         </Group>
       </Stack>
@@ -568,7 +592,7 @@ export function MortgageCalculator() {
                 }}>
                   <td>
                     <Text fw={comparison.rate === values.interestRate ? 700 : 400}>
-                      {safeToFixed(comparison.rate, 2)}%
+                      {safeToFixed(comparison.rate, 3)}%
                     </Text>
                   </td>
                   <td>${formatWithCommas(comparison.monthlyPayment)}</td>
@@ -617,15 +641,12 @@ export function MortgageCalculator() {
               </Group>
               
               <Group grow>
-                <Select
-                  label="New Loan Term"
-                  value={refiInputs.newTerm.toString()}
-                  onChange={(val) => setRefiInputs(prev => ({ ...prev, newTerm: parseInt(val || '30') }))}
-                  data={[
-                    { value: '15', label: '15 years' },
-                    { value: '20', label: '20 years' },
-                    { value: '30', label: '30 years' },
-                  ]}
+                <NumberInput
+                  label="Years Owned"
+                  value={refiInputs.yearsOwned}
+                  onChange={(val) => setRefiInputs(prev => ({ ...prev, yearsOwned: Number(val) || 0 }))}
+                  min={0}
+                  max={values.loanTerm}
                 />
                 <NumberInput
                   label="Closing Costs"
@@ -633,6 +654,39 @@ export function MortgageCalculator() {
                   onChange={(val) => setRefiInputs(prev => ({ ...prev, closingCosts: Number(val) || 0 }))}
                   prefix="$"
                   thousandSeparator=","
+                />
+              </Group>
+              
+              <Group grow>
+                <Select
+                  label="New Loan Term"
+                  value={refiInputs.newTerm.toString()}
+                  onChange={(val) => setRefiInputs(prev => ({ ...prev, newTerm: parseInt(val || '30') }))}
+                  data={(() => {
+                    const remainingTerm = calculateRemainingTerm();
+                    const standardTerms = [15, 20, 30];
+                    
+                    // Create options array, avoiding duplicates
+                    const options = [];
+                    
+                    // Add remaining term option if it's valid and unique
+                    if (remainingTerm > 0 && !standardTerms.includes(remainingTerm)) {
+                      options.push({ 
+                        value: remainingTerm.toString(), 
+                        label: `${remainingTerm} years (current remaining)` 
+                      });
+                    }
+                    
+                    // Add standard terms
+                    standardTerms.forEach(term => {
+                      options.push({ 
+                        value: term.toString(), 
+                        label: `${term} years${term === remainingTerm ? ' (current remaining)' : ''}` 
+                      });
+                    });
+                    
+                    return options;
+                  })()}
                 />
               </Group>
               
@@ -655,6 +709,18 @@ export function MortgageCalculator() {
                     {refiAnalysis.isWorthIt ? 'WORTH IT' : 'NOT WORTH IT'}
                   </Badge>
                 </Group>
+                
+                {/* Explanation */}
+                <Paper p="sm" withBorder mb="md" bg={refiAnalysis.isWorthIt ? 'green.0' : 'red.0'}>
+                  <Text size="sm" fw={500} c={refiAnalysis.isWorthIt ? 'green.7' : 'red.7'}>
+                    {refiAnalysis.isWorthIt 
+                      ? `✅ You'll break even in ${refiAnalysis.breakEvenMonths.toFixed(1)} months and save $${formatWithCommas(refiAnalysis.monthlySavings)} monthly.`
+                      : refiAnalysis.monthlySavings <= 0
+                        ? `❌ Your monthly payment would increase by $${formatWithCommas(Math.abs(refiAnalysis.monthlySavings))}.`
+                        : `❌ Break-even takes ${refiAnalysis.breakEvenMonths.toFixed(1)} months (industry standard is 24 months).`
+                    }
+                  </Text>
+                </Paper>
                 
                 <Stack gap="md">
                   <Group grow>

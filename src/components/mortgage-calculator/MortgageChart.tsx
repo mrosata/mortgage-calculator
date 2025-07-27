@@ -21,9 +21,10 @@ interface ChartData {
 
 interface MortgageChartProps {
   data: ChartData[];
+  onBarClick?: (yearData: ChartData) => void;
 }
 
-export function MortgageChart({ data }: MortgageChartProps) {
+export function MortgageChart({ data, onBarClick }: MortgageChartProps) {
   // Calculate the maximum value for the primary Y-axis (bars)
   const maxBarValue = Math.max(
     ...data.map(d => d.principal + d.interest + d.tax)
@@ -94,9 +95,30 @@ export function MortgageChart({ data }: MortgageChartProps) {
             labelFormatter={(year) => `Year ${year}`}
           />
           <Legend />
-          <Bar dataKey="tax" stackId="a" fill="#8884d8" name="Taxes & Fees" />
-          <Bar dataKey="interest" stackId="a" fill="#82ca9d" name="Interest" />
-          <Bar dataKey="principal" stackId="a" fill="#ffc658" name="Principal" />
+          <Bar 
+            dataKey="tax" 
+            stackId="a" 
+            fill="#8884d8" 
+            name="Taxes & Fees"
+            onClick={(data) => onBarClick && onBarClick(data.payload)}
+            style={{ cursor: onBarClick ? 'pointer' : 'default' }}
+          />
+          <Bar 
+            dataKey="interest" 
+            stackId="a" 
+            fill="#82ca9d" 
+            name="Interest"
+            onClick={(data) => onBarClick && onBarClick(data.payload)}
+            style={{ cursor: onBarClick ? 'pointer' : 'default' }}
+          />
+          <Bar 
+            dataKey="principal" 
+            stackId="a" 
+            fill="#ffc658" 
+            name="Principal"
+            onClick={(data) => onBarClick && onBarClick(data.payload)}
+            style={{ cursor: onBarClick ? 'pointer' : 'default' }}
+          />
           <Line 
             type="monotone" 
             dataKey="scaledBalance" 
